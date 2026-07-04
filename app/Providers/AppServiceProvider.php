@@ -3,9 +3,12 @@
 namespace App\Providers;
 
 use App\Models\ReportNotification;
+use App\Models\WaterBill;
+use App\Policies\WaterBillPolicy;
 use Illuminate\Pagination\Paginator;
-use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\View;
+use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -17,6 +20,8 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         Paginator::useBootstrapFive();
+
+        Gate::policy(WaterBill::class, WaterBillPolicy::class);
 
         View::composer('layouts.app', function ($view) {
             $user = auth()->user();

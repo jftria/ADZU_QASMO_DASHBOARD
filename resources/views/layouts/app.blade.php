@@ -373,6 +373,9 @@
             @if (auth()->user()?->canAccessReportType('estimated-savings'))
                 <a class="nav-link {{ request()->routeIs('estimated-savings.*') ? 'active' : '' }}" href="{{ route('estimated-savings.index') }}"><i class="bi bi-cash-coin"></i> Estimated Savings</a>
             @endif
+            @if (auth()->user()?->canAccessReportType('water-bills'))
+                <a class="nav-link {{ request()->routeIs('water-bills.*') ? 'active' : '' }}" href="{{ route('water-bills.index') }}"><i class="bi bi-droplet"></i> Water Consumption</a>
+            @endif
         </nav>
 
         <div class="nav-section">Common Menu</div>

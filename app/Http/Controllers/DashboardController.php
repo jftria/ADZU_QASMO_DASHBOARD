@@ -8,6 +8,7 @@ use App\Models\FuelPrice;
 use App\Models\FuelVehicleUse;
 use App\Models\SolarPerformance;
 use App\Models\StudentServiceVolume;
+use App\Models\WaterBill;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\View\View;
@@ -31,6 +32,7 @@ class DashboardController extends Controller
             'solar' => $this->solarData($request),
             'student-services' => $this->studentServicesData($request),
             'estimated-savings' => $this->estimatedSavingsData($request),
+            'water-bills' => $this->waterBillsData($request),
             default => $this->fuelPricesData($request),
         };
 
@@ -49,6 +51,7 @@ class DashboardController extends Controller
             'solar' => ['label' => 'Solar Savings', 'icon' => 'bi-sun', 'module' => 'solar-performances'],
             'student-services' => ['label' => 'Student Service Volume', 'icon' => 'bi-people', 'module' => 'student-service-volumes'],
             'estimated-savings' => ['label' => 'Estimated Savings', 'icon' => 'bi-cash-coin', 'module' => 'estimated-savings'],
+            'water-bills' => ['label' => 'Water Consumption', 'icon' => 'bi-droplet', 'module' => 'water-bills'],
         ];
 
         return collect($categories)
@@ -547,6 +550,93 @@ class DashboardController extends Controller
         ];
     }
 
+    private function waterBillsData(Request $request): array
+    {
+        $waterBills = WaterBill::visibleTo($request->user())
+            ->orderBy('reporting_year')
+            ->orderBy('reporting_month')
+            ->get();
+
+        $latestBill = $waterBills->sortByDesc(fn (WaterBill $record) => ($record->reporting_year * 100) + (int) $record->reporting_month)->first();
+        $topContributor = $latestBill?->topContributor();
+
+        $monthlyPeriods = $waterBills
+            ->sortBy(fn (WaterBill $record) => ($record->reporting_year * 100) + (int) $record->reporting_month)
+            ->map(fn (WaterBill $record) => [
+                'key' => $this->monthKey((int) $record->reporting_year, (int) $record->reporting_month),
+                'label' => $this->monthLabel((int) $record->reporting_year, (int) $record->reporting_month),
+            ])
+            ->unique('key')
+            ->values();
+
+        $facilityTrendData = collect(WaterBill::FACILITY_FIELDS)
+            ->mapWithKeys(fn (string $label, string $field) => [
+                $label => $monthlyPeriods->map(fn (array $period) => (float) $waterBills->where('reporting_year', (int) substr($period['key'], 0, 4))
+                    ->where('reporting_month', (int) substr($period['key'], 5))
+                    ->sum($field))->values(),
+            ]);
+
+        $facilityFilterOptions = array_merge(
+            [['value' => 'all', 'label' => 'All buildings/campus']],
+            collect(WaterBill::FACILITY_FIELDS)
+                ->map(fn (string $label, string $field) => ['value' => $field, 'label' => $label])
+                ->values()
+                ->all()
+        );
+
+        return [
+            'pageTitle' => 'Water Consumption',
+            'pageIcon' => 'bi-droplet',
+            'description' => 'Water bill charts and summary analytics for each building or campus.',
+            'createRoute' => route('water-bills.create'),
+            'recordsRoute' => route('water-bills.index'),
+            'metrics' => [
+                ['label' => 'Total combined water bill', 'value' => '₱' . $this->formatDecimal($latestBill?->totalBill() ?? 0), 'hint' => 'Latest submitted month'],
+                ['label' => 'Reporting month', 'value' => $latestBill ? $this->monthName((int) $latestBill->reporting_month) : 'N/A', 'hint' => 'Latest submitted period'],
+                ['label' => 'Highest single bill', 'value' => $topContributor['facility'] ?? 'N/A', 'hint' => '₱' . ($topContributor ? $this->formatDecimal($topContributor['amount']) : '0.00')],
+                ['label' => 'Submitted records', 'value' => (string) $waterBills->count(), 'hint' => 'Water bill entries'],
+            ],
+            'charts' => [
+                [
+                    'id' => 'waterBillLineChart',
+                    'title' => 'Water Bill Trend by Facility',
+                    'icon' => 'bi-graph-up',
+                    'type' => 'line',
+                    'labels' => $monthlyPeriods->pluck('label')->values(),
+                    'filterOptions' => $facilityFilterOptions,
+                    'datasets' => collect(WaterBill::FACILITY_FIELDS)->map(fn (string $label, string $field) => [
+                        'label' => $label,
+                        'data' => $facilityTrendData[$label] ?? [],
+                        'borderColor' => $this->chartColor($field),
+                        'backgroundColor' => $this->transparentColor($this->chartColor($field)),
+                        'tension' => .25,
+                        'filterGroup' => $field,
+                    ])->values()->all(),
+                    'showPointLabels' => true,
+                    'wide' => true,
+                ],
+                [
+                    'id' => 'waterBillBarChart',
+                    'title' => 'Water Bill Comparison by Facility',
+                    'icon' => 'bi-bar-chart',
+                    'type' => 'bar',
+                    'labels' => collect(WaterBill::FACILITY_FIELDS)->values()->all(),
+                    'filterOptions' => [['value' => 'all', 'label' => 'All buildings/campus']],
+                    'datasets' => [[
+                        'label' => 'Water bill (PHP)',
+                        'data' => collect(WaterBill::FACILITY_FIELDS)->keys()->map(fn (string $field) => round($waterBills->sum($field), 2))->values()->all(),
+                        'backgroundColor' => collect(WaterBill::FACILITY_FIELDS)->keys()->map(fn (string $field) => $this->chartColor($field))->values()->all(),
+                        'borderColor' => collect(WaterBill::FACILITY_FIELDS)->keys()->map(fn (string $field) => $this->chartColor($field))->values()->all(),
+                        'filterGroup' => 'all',
+                    ]],
+                    'showPointLabels' => true,
+                    'wide' => true,
+                ],
+            ],
+            'remarks' => collect(),
+        ];
+    }
+
     private function estimatedSavingsData(Request $request): array
     {
         $savings = EstimatedSaving::query()
@@ -711,5 +801,29 @@ class DashboardController extends Controller
             11 => 'Nov',
             12 => 'Dec',
         ][$month] ?? 'N/A';
+    }
+
+    private function monthKey(int $year, int $month): string
+    {
+        return $year.'-'.$month;
+    }
+
+    private function monthLabel(int $year, int $month): string
+    {
+        return $year.' '.$this->monthName($month);
+    }
+
+    private function chartColor(string $field): string
+    {
+        return match ($field) {
+            'lantaka_annex_a' => '#0d6efd',
+            'lantaka_old_4_st' => '#20c997',
+            'jr_kitchen' => '#198754',
+            'main' => '#fd7e14',
+            'fws' => '#dc3545',
+            'ppo_shop' => '#6f42c1',
+            'aux_old_dorm' => '#d63384',
+            default => '#0d6efd',
+        };
     }
 }

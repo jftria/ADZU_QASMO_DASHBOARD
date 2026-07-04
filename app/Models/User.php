@@ -18,6 +18,7 @@ class User extends Authenticatable
         'solar-performances' => 'Solar Savings',
         'student-service-volumes' => 'Student Service Volume',
         'estimated-savings' => 'Estimated Savings',
+        'water-bills' => 'Water Consumption',
     ];
 
     protected $fillable = [

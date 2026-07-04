@@ -9,6 +9,7 @@ use App\Models\FuelVehicleUse;
 use App\Models\ReportLog;
 use App\Models\SolarPerformance;
 use App\Models\StudentServiceVolume;
+use App\Models\WaterBill;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -129,6 +130,10 @@ class ReportController extends Controller
             ->when($request->filled('respondent_name'), fn ($query) => $query->where('respondent_name', $request->input('respondent_name')))
             ->get() : collect();
 
+        $waterBills = $user->canAccessReportType('water-bills')
+            ? $this->filterCollection($request, WaterBill::query()->get())
+            : collect();
+
         $summary = [];
 
         if ($user->canAccessReportType('electricity-consumptions')) {
@@ -156,6 +161,10 @@ class ReportController extends Controller
 
         if ($user->canAccessReportType('estimated-savings')) {
             $summary['Total estimated yearly savings'] = round($savings->sum('total_estimated_savings'), 2);
+        }
+
+        if ($user->canAccessReportType('water-bills')) {
+            $summary['Total water bill (PHP)'] = round($waterBills->sum(fn (WaterBill $record) => $record->totalBill()), 2);
         }
 
         return $summary;
@@ -238,6 +247,14 @@ class ReportController extends Controller
                         round($records->sum('reduced_utilities_savings'), 2),
                         round($records->sum('reduced_activities_savings'), 2),
                     ],
+                ]],
+            ],
+            'water-bills' => [
+                'type' => 'bar',
+                'labels' => collect(WaterBill::FACILITY_FIELDS)->values()->all(),
+                'datasets' => [[
+                    'label' => 'Water bill (PHP)',
+                    'data' => collect(WaterBill::FACILITY_FIELDS)->keys()->map(fn (string $field) => round($records->sum($field), 2))->values()->all(),
                 ]],
             ],
             default => ['type' => 'bar', 'labels' => [], 'datasets' => []],
@@ -340,6 +357,22 @@ class ReportController extends Controller
                     'reduced_utilities_savings' => 'Utilities',
                     'reduced_activities_savings' => 'Activities',
                     'total_estimated_savings' => 'Total',
+                ],
+            ],
+            'water-bills' => [
+                'label' => 'Water Consumption',
+                'model' => WaterBill::class,
+                'columns' => [
+                    'responder_name' => 'Responder',
+                    'reporting_month' => 'Month',
+                    'reporting_year' => 'Year',
+                    'lantaka_annex_a' => 'Lantaka Annex A',
+                    'lantaka_old_4_st' => 'Lantaka Old 4-ST',
+                    'jr_kitchen' => 'JR Kitchen',
+                    'main' => 'Main',
+                    'fws' => 'FWS',
+                    'ppo_shop' => 'PPO Shop',
+                    'aux_old_dorm' => 'AUX/OLD DORM',
                 ],
             ],
         ];
